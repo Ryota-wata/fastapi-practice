@@ -1,20 +1,13 @@
-# python3.11のイメージをダウンロード
-FROM python:3.11-buster
+FROM python:3.9
 
-# pythonの出力表示をDocker用に調整
-ENV PYTHONUNBUFFERED=1
+WORKDIR /app
 
-WORKDIR /src
+COPY ./app/requirements.txt /app/requirements.txt
 
-# pipを使ってpoetryをインストール
-RUN pip install poetry
+RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
 
-# poetryの定義ファイルをコピー（存在する場合）
-COPY pyproject.toml*poetry.lock* ./
+COPY ./app /app
 
-# poetryでライブラリをインストール(pyproject.tomlが既にある場合)
-RUN poetry config virtualenvs.in-project true
-RUN if [-f pyproject.toml]; then poetry install --no-root;fi
+ENV WEBSITE_HOSTNAME=GraphAPI-practice.azurewebsites.net
 
-# uvicornのサーバーを立ち上げる
-ENTRYPOINT ["poetry", "run", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
