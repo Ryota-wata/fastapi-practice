@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import base64
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -19,8 +20,11 @@ def get_authenticated_user(request: Request):
     if not user_info_encoded:
         raise HTTPException(status_code=401, detail="Unauthorized: Missing X-MS-CLIENT-PRINCIPAL header")
     
-    # Base64でエンコードされたユーザー情報をデコード
-    user_info_decoded = json.loads(user_info_encoded)
+    try:
+        # Base64でエンコードされたユーザー情報をデコード
+        user_info_decoded = json.loads(base64.b64decode(user_info_encoded).decode('utf-8'))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="Failed to decode user info: " + str(e))
     
     return user_info_decoded
 
@@ -36,9 +40,9 @@ def get_access_token():
     
     response = requests.get(token_endpoint, headers=headers, params=params)
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="Failed to acquire token: " + response.text)
+        raise HTTPException(status_code=500, detail=f"Failed to acquire token: {response.status_code} - {response.text}")
     
-    return response.json()["access_token"]
+    return response.json().get("access_token")
 
 # Microsoft Graph APIからユーザー情報を取得
 def get_user_info_from_graph_api():
@@ -47,7 +51,7 @@ def get_user_info_from_graph_api():
     
     response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Failed to get user info from Microsoft Graph API: " + response.text)
+        raise HTTPException(status_code=response.status_code, detail=f"Failed to get user info from Microsoft Graph API: {response.status_code} - {response.text}")
     
     return response.json()
 
@@ -74,3 +78,6 @@ async def homepage(request: Request):
     except HTTPException as e:
         print(f"Error: {e.detail}")
         raise e
+    except Exception as e:
+        print(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred")
