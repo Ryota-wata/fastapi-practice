@@ -1,13 +1,17 @@
+# Python 3.9ベースのイメージを使用
 FROM python:3.9
 
+# 作業ディレクトリを設定
 WORKDIR /app
 
-COPY ./app/requirements.txt /app/requirements.txt
+# 依存関係を追加
+COPY requirements.txt .
 
-RUN pip install --no-cache-dir --upgrade -r /app/requirements.txt
+# パッケージをインストール
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY ./app /app
+# アプリケーションコードをコピー
+COPY . .
 
-ENV WEBSITE_HOSTNAME=GraphAPI-practice.azurewebsites.net
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+# FastAPIアプリを起動
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

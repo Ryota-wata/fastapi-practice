@@ -1,69 +1,67 @@
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
-from fastapi.templating import Jinja2Templates
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from starlette.responses import RedirectResponse
+import os
+import json
 import requests
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 app = FastAPI()
 
+# Jinja2テンプレート設定
 templates = Jinja2Templates(directory="templates")
 
-# マネージドIDを使用してアクセストークンを取得する関数
-def get_access_token():
-    metadata_url = "http://169.254.169.254/metadata/identity/oauth2/token"
-    params = {
-        "api-version": "2018-02-01",
-        "resource": "https://graph.microsoft.com",
-    }
-    headers = {"Metadata": "true"}
+# Microsoft Graph APIのエンドポイント
+GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 
-    response = requests.get(metadata_url, params=params, headers=headers)
-    response.raise_for_status()
+# EasyAuthで認証されたユーザー情報を取得
+def get_authenticated_user(request: Request):
+    user_info_encoded = request.headers.get("X-MS-CLIENT-PRINCIPAL")
+    if not user_info_encoded:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Base64でエンコードされたユーザー情報をデコード
+    user_info_decoded = user_info_encoded.encode('ascii')
+    user_info = json.loads(user_info_decoded)
+    
+    return user_info
+
+# マネージドIDを使用してMicrosoft Graph用のアクセストークンを取得
+def get_access_token():
+    token_endpoint = "http://169.254.169.254/metadata/identity/oauth2/token"
+    resource = "https://graph.microsoft.com"
+    headers = {"Metadata": "true"}
+    params = {
+        "api-version": "2019-08-01",
+        "resource": resource
+    }
+    
+    response = requests.get(token_endpoint, headers=headers, params=params)
+    if response.status_code != 200:
+        raise HTTPException(status_code=500, detail="Failed to acquire token")
+    
     return response.json()["access_token"]
 
-# Graph APIを呼び出す関数
-def call_graph_api(endpoint):
+# Microsoft Graph APIからユーザー情報を取得
+def get_user_info_from_graph_api():
     token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
-    }
-    response = requests.get(f"https://graph.microsoft.com/v1.0/{endpoint}", headers=headers)
-    response.raise_for_status()
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Failed to get user info from Microsoft Graph API")
+    
     return response.json()
 
-users = {
-    "user1": "password1",
-    "user2": "password2"
-}
+@app.get("/", response_class=HTMLResponse)
+async def homepage(request: Request):
+    # 認証されたユーザー情報
+    user_info = get_authenticated_user(request)
+    
+    # Microsoft Graphから追加のユーザー情報を取得
+    graph_user_info = get_user_info_from_graph_api()
 
-security = HTTPBasic()
-
-def authenticate_user(credentials: HTTPBasicCredentials = Depends(security)):
-    username = credentials.username
-    password = credentials.password
-    if username in users and users[username] == password:
-        return username
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Incorrect username or password",
-        headers={"WWW-Authenticate": "Basic"},
-    )
-
-@app.get("/")
-async def root(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-@app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    if username in users and users[username] == password:
-        response = RedirectResponse(url="/home", status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(key="username", value=username)
-        return response
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password"})
-
-@app.get("/home")
-async def home(request: Request, username: str = Depends(authenticate_user)):
-    # Graph APIを呼び出す例
-    user_info = call_graph_api("me")
-    return templates.TemplateResponse("home.html", {"request": request, "username": username, "user_info": user_info})
+    return templates.TemplateResponse("index.html", {
+        "request": request, 
+        "user_info": user_info, 
+        "graph_user_info": graph_user_info
+    })
