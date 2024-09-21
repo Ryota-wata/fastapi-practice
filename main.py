@@ -17,13 +17,12 @@ GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 def get_authenticated_user(request: Request):
     user_info_encoded = request.headers.get("X-MS-CLIENT-PRINCIPAL")
     if not user_info_encoded:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Unauthorized: Missing X-MS-CLIENT-PRINCIPAL header")
     
     # Base64でエンコードされたユーザー情報をデコード
-    user_info_decoded = user_info_encoded.encode('ascii')
-    user_info = json.loads(user_info_decoded)
+    user_info_decoded = json.loads(user_info_encoded)
     
-    return user_info
+    return user_info_decoded
 
 # マネージドIDを使用してMicrosoft Graph用のアクセストークンを取得
 def get_access_token():
@@ -37,7 +36,7 @@ def get_access_token():
     
     response = requests.get(token_endpoint, headers=headers, params=params)
     if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="Failed to acquire token")
+        raise HTTPException(status_code=500, detail="Failed to acquire token: " + response.text)
     
     return response.json()["access_token"]
 
@@ -48,20 +47,30 @@ def get_user_info_from_graph_api():
     
     response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail="Failed to get user info from Microsoft Graph API")
+        raise HTTPException(status_code=response.status_code, detail="Failed to get user info from Microsoft Graph API: " + response.text)
     
     return response.json()
 
+@app.middleware("http")
+async def log_request(request: Request, call_next):
+    print(f"Request headers: {request.headers}")
+    response = await call_next(request)
+    return response
+
 @app.get("/", response_class=HTMLResponse)
 async def homepage(request: Request):
-    # 認証されたユーザー情報
-    user_info = get_authenticated_user(request)
-    
-    # Microsoft Graphから追加のユーザー情報を取得
-    graph_user_info = get_user_info_from_graph_api()
+    try:
+        # 認証されたユーザー情報
+        user_info = get_authenticated_user(request)
+        
+        # Microsoft Graphから追加のユーザー情報を取得
+        graph_user_info = get_user_info_from_graph_api()
 
-    return templates.TemplateResponse("index.html", {
-        "request": request, 
-        "user_info": user_info, 
-        "graph_user_info": graph_user_info
-    })
+        return templates.TemplateResponse("index.html", {
+            "request": request, 
+            "user_info": user_info, 
+            "graph_user_info": graph_user_info
+        })
+    except HTTPException as e:
+        print(f"Error: {e.detail}")
+        raise e
