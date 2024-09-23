@@ -1,8 +1,7 @@
 import os
 import json
-import base64
 import requests
-from azure.identity import DefaultAzureCredential
+import base64
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -19,10 +18,7 @@ app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
 # Microsoft Graph APIのエンドポイント
-GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0"
-
-# マネージドIDの認証情報を取得
-credential = DefaultAzureCredential()
+GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 
 # EasyAuthで認証されたユーザー情報を取得
 def get_authenticated_user(request: Request):
@@ -39,26 +35,33 @@ def get_authenticated_user(request: Request):
         logger.error(f"Failed to decode user info: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to decode user info: {str(e)}")
 
+# アクセストークンを取得
+def get_access_token(request: Request):
+    access_token = request.headers.get("X-MS-TOKEN-AAD-ACCESS-TOKEN")
+    if not access_token:
+        logger.error("Missing X-MS-TOKEN-AAD-ACCESS-TOKEN header")
+        raise HTTPException(status_code=401, detail="Unauthorized: Missing access token")
+    logger.debug(f"Access token: {access_token[:10]}...")  # トークンの最初の10文字のみをログに記録
+    return access_token
+
 # Microsoft Graph APIからユーザー情報を取得
-def get_user_info_from_graph_api(user_id: str):
+def get_user_info_from_graph_api(request: Request):
+    access_token = get_access_token(request)
+    headers = {'Authorization': f'Bearer {access_token}'}
+    
     try:
-        # アクセストークンを取得
-        token = credential.get_token("https://graph.microsoft.com/.default")
-        
-        headers = {
-            'Authorization': f'Bearer {token.token}',
-            'Content-Type': 'application/json'
-        }
-        
-        # ユーザー情報を取得
-        response = requests.get(f"{GRAPH_API_ENDPOINT}/users/{user_id}", headers=headers)
+        logger.debug(f"Sending request to Graph API: {GRAPH_API_ENDPOINT}")
+        response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
         response.raise_for_status()
         user_info = response.json()
         logger.debug(f"Retrieved user info from Graph API: {user_info}")
         return user_info
-    except Exception as e:
+    except requests.RequestException as e:
         logger.error(f"Failed to get user info from Microsoft Graph API: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get user info from Microsoft Graph API: {str(e)}")
+        logger.error(f"Response status code: {e.response.status_code if e.response else 'No response'}")
+        logger.error(f"Response content: {e.response.content if e.response else 'No response'}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 500, 
+                            detail=f"Failed to get user info from Microsoft Graph API: {str(e)}")
 
 @app.middleware("http")
 async def log_request(request: Request, call_next):
@@ -72,14 +75,8 @@ async def homepage(request: Request):
         # 認証されたユーザー情報
         user_info = get_authenticated_user(request)
         
-        # ユーザーIDを取得（ここでは、オブジェクトIDを使用）
-        user_id = next((claim['val'] for claim in user_info['claims'] if claim['typ'] == 'http://schemas.microsoft.com/identity/claims/objectidentifier'), None)
-        
-        if not user_id:
-            raise HTTPException(status_code=400, detail="User ID not found in claims")
-        
         # Microsoft Graphから追加のユーザー情報を取得
-        graph_user_info = get_user_info_from_graph_api(user_id)
+        graph_user_info = get_user_info_from_graph_api(request)
 
         return templates.TemplateResponse("index.html", {
             "request": request, 
