@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import base64
-from azure.identity import DefaultAzureCredential
+from azure.identity import ClientSecretCredential
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -21,8 +21,13 @@ templates = Jinja2Templates(directory="templates")
 # Microsoft Graph APIのエンドポイント
 GRAPH_API_ENDPOINT = "https://graph.microsoft.com/v1.0/me"
 
-# マネージドIDの認証情報を取得
-credential = DefaultAzureCredential()
+# Azure AD設定
+TENANT_ID = os.getenv("AZURE_TENANT_ID")
+CLIENT_ID = os.getenv("AZURE_CLIENT_ID")
+CLIENT_SECRET = os.getenv("AZURE_CLIENT_SECRET")
+
+# クライアントシークレット認証情報を作成
+credential = ClientSecretCredential(TENANT_ID, CLIENT_ID, CLIENT_SECRET)
 
 # EasyAuthで認証されたユーザー情報を取得
 def get_authenticated_user(request: Request):
@@ -39,13 +44,12 @@ def get_authenticated_user(request: Request):
         logger.error(f"Failed to decode user info: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Failed to decode user info: {str(e)}")
 
-# Microsoft Graph用のアクセストークンを取得
+# アクセストークンを取得
 def get_access_token():
     try:
-        # マネージドIDを使用してトークンを取得
         scope = "https://graph.microsoft.com/.default"
         access_token = credential.get_token(scope).token
-        logger.debug(f"Access token acquired: {access_token[:10]}...")  # トークンの最初の10文字のみをログに記録
+        logger.debug(f"Access token acquired: {access_token[:10]}...")
         return access_token
     except Exception as e:
         logger.error(f"Failed to get access token: {str(e)}")
@@ -53,10 +57,10 @@ def get_access_token():
 
 # Microsoft Graph APIからユーザー情報を取得
 def get_user_info_from_graph_api():
-    access_token = get_access_token()
-    headers = {'Authorization': f'Bearer {access_token}'}
-    
     try:
+        access_token = get_access_token()
+        headers = {'Authorization': f'Bearer {access_token}'}
+        
         logger.debug(f"Sending request to Graph API: {GRAPH_API_ENDPOINT}")
         response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
         response.raise_for_status()
