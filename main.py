@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import base64
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, InteractiveBrowserCredential
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -30,30 +30,27 @@ def get_authenticated_user(request: Request):
     
     return user_info_decoded
 
-# マネージドIDを使用してMicrosoft Graph用のアクセストークンを取得
+# マネージドIDまたは対話型ブラウザ認証を使用してMicrosoft Graph用のアクセストークンを取得
 def get_access_token():
-    token_endpoint = "http://169.254.169.254/metadata/identity/oauth2/token"
-    resource = "https://graph.microsoft.com"
-    headers = {"Metadata": "true"}
-    params = {
-        "api-version": "2019-08-01",
-        "resource": resource
-    }
-    
-    response = requests.get(token_endpoint, headers=headers, params=params)
-    if response.status_code != 200:
-        raise HTTPException(status_code=500, detail="Failed to acquire token: " + response.text)
-    
-    return response.json()["access_token"]
+    try:
+        # まずマネージドIDでトークンを取得しようとする
+        credential = DefaultAzureCredential()
+        scope = "https://graph.microsoft.com/.default"
+        access_token = credential.get_token(scope).token
+        return access_token
+    except Exception as e:
+        print(f"Failed to get token using Managed Identity: {str(e)}")
+        print("Falling back to interactive browser authentication")
+        
+        # マネージド ID が使用できない場合は対話型ブラウザ認証を使用
+        credential = InteractiveBrowserCredential()
+        scope = "https://graph.microsoft.com/user.read"
+        access_token = credential.get_token(scope).token
+        return access_token
 
 # Microsoft Graph APIからユーザー情報を取得
 def get_user_info_from_graph_api():
-
-    # マネージドIDを使用してトークンを取得
-    credential = DefaultAzureCredential()
-    scope = "https://graph.microsoft.com/.default"
-    access_token = credential.get_token(scope).token
-
+    access_token = get_access_token()
     headers = {'Authorization': f'Bearer {access_token}'}
     
     response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
