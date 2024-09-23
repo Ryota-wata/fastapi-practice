@@ -56,13 +56,14 @@ def get_access_token():
         raise HTTPException(status_code=500, detail=f"Failed to get access token: {str(e)}")
 
 # Microsoft Graph APIからユーザー情報を取得
-def get_user_info_from_graph_api():
+def get_user_info_from_graph_api(user_id):
     try:
         access_token = get_access_token()
         headers = {'Authorization': f'Bearer {access_token}'}
         
-        logger.debug(f"Sending request to Graph API: {GRAPH_API_ENDPOINT}")
-        response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
+        endpoint = f"https://graph.microsoft.com/v1.0/users/{user_id}"
+        logger.debug(f"Sending request to Graph API: {endpoint}")
+        response = requests.get(endpoint, headers=headers)
         response.raise_for_status()
         user_info = response.json()
         logger.debug(f"Retrieved user info from Graph API: {user_info}")
@@ -70,15 +71,9 @@ def get_user_info_from_graph_api():
     except requests.RequestException as e:
         logger.error(f"Failed to get user info from Microsoft Graph API: {str(e)}")
         logger.error(f"Response status code: {e.response.status_code if e.response else 'No response'}")
-        logger.error(f"Response content: {e.response.content if e.response else 'No response'}")
+        logger.error(f"Response content: {e.response.content.decode() if e.response and e.response.content else 'No response'}")
         raise HTTPException(status_code=e.response.status_code if e.response else 500, 
                             detail=f"Failed to get user info from Microsoft Graph API: {str(e)}")
-
-@app.middleware("http")
-async def log_request(request: Request, call_next):
-    logger.debug(f"Request headers: {request.headers}")
-    response = await call_next(request)
-    return response
 
 @app.get("/", response_class=HTMLResponse)
 async def homepage(request: Request):
@@ -86,8 +81,14 @@ async def homepage(request: Request):
         # 認証されたユーザー情報
         user_info = get_authenticated_user(request)
         
+        # ユーザーIDを取得（ここでは、オブジェクトIDを使用）
+        user_id = next((claim['val'] for claim in user_info['claims'] if claim['typ'] == 'http://schemas.microsoft.com/identity/claims/objectidentifier'), None)
+        
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID not found in claims")
+        
         # Microsoft Graphから追加のユーザー情報を取得
-        graph_user_info = get_user_info_from_graph_api()
+        graph_user_info = get_user_info_from_graph_api(user_id)
 
         return templates.TemplateResponse("index.html", {
             "request": request, 
