@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import base64
+from azure.identity import DefaultAzureCredential
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -47,8 +48,13 @@ def get_access_token():
 
 # Microsoft Graph APIからユーザー情報を取得
 def get_user_info_from_graph_api():
-    token = get_access_token()
-    headers = {"Authorization": f"Bearer {token}"}
+
+    # マネージドIDを使用してトークンを取得
+    credential = DefaultAzureCredential()
+    scope = "https://graph.microsoft.com/.default"
+    access_token = credential.get_token(scope).token
+
+    headers = {'Authorization': f'Bearer {access_token}'}
     
     response = requests.get(GRAPH_API_ENDPOINT, headers=headers)
     if response.status_code != 200:
